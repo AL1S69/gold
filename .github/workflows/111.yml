@@ -107,11 +107,11 @@ jobs:
           fi
 
 
-      - name: 应用 Hide Stuff 补丁
-        run: |
-          cd kernel_workspace/common
-          cp ../SukiSU_patch/69_hide_stuff.patch ./
-          patch -p1 < 69_hide_stuff.patch
+      #- name: 应用 Hide Stuff 补丁
+        #run: |
+          #cd kernel_workspace/common
+          #cp ../SukiSU_patch/69_hide_stuff.patch ./
+          #patch -p1 < 69_hide_stuff.patch
 
           
       - name: 添加制作名称
