@@ -134,6 +134,8 @@ jobs:
         run: |
           cd kernel_workspace
           export LTO=thin SYSTEM_DLKM_RE_SIGN=0 BUILD_SYSTEM_DLKM=0 KMI_SYMBOL_LIST_STRICT_MODE=0
+          export KBUILD_BUILD_HOST=欣然love白
+          export KBUILD_BUILD_USER=@Xinran_StarBai
           BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh || echo "完毕"
          
           
