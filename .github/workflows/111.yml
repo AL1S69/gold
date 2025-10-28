@@ -86,6 +86,20 @@ jobs:
           echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
           export KSU_VERSION=$KSU_VERSION
           sed -i "s/DKSU_VERSION=12800/DKSU_VERSION=$KSU_VERSION/" kernel/Makefile
+
+      - name: 应用 SukiSU-Ultra & SUSFS 补丁
+        run: |
+          cd kernel_workspace
+          git clone https://github.com/ShirkNeko/susfs4ksu.git -b gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}
+          git clone https://github.com/ShirkNeko/SukiSU_patch.git
+          cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch ./common/
+          cp ./susfs4ksu/kernel_patches/fs/* ./common/fs/
+          cp ./susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+          cp ./SukiSU_patch/hooks/syscall_hooks.patch ./common/
+          cd ./common
+          patch -p1 < 50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
+          patch -p1 < syscall_hooks.patch || true
+          
       - name: 应用 lz4k 补丁（辅助zram）
         run: |
           if [[ "${{ github.event.inputs.lz4k_enable }}" == "true" ]]; then
@@ -96,6 +110,14 @@ jobs:
             cp ../SukiSU_patch/other/zram/zram_patch/${{ env.KERNEL_VERSION }}/lz4kd.patch ./
             patch -p1 -F 3 < lz4kd.patch || true
           fi
+
+
+      - name: 应用 Hide Stuff 补丁
+        run: |
+          cd kernel_workspace/common
+          cp ../SukiSU_patch/69_hide_stuff.patch ./
+          patch -p1 < 69_hide_stuff.patch
+
           
       - name: 添加制作名称
         run: |
