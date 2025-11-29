@@ -349,8 +349,8 @@ jobs:
           export KBUILD_BUILD_USER=XinRan♡
           export KBUILD_BUILD_HOST=Bai
           cd ../common
-          make LLVM=1 LLVM_IAS=1 ARCH=arm64 CC="ccache clang" HOSTCC="ccache clang" HOSTCXX="ccache clang++" PYTHON=python3 O=out gki_defconfig
-          make LLVM=1 LLVM_IAS=1 ARCH=arm64 CC="ccache clang" HOSTCC="ccache clang" HOSTCXX="ccache clang++" PYTHON=python3 O=out KCFLAGS=-Wno-error -j$(nproc --all)
+          make LLVM=1 LLVM_IAS=1 ARCH=arm64 CC="ccache clang" HOSTCC="ccache clang --target=aarch64-linux-gnu" HOSTCXX="ccache clang++" PYTHON=python3 O=out gki_defconfig
+          make LLVM=1 LLVM_IAS=1 ARCH=arm64 CC="ccache clang" HOSTCC="ccache clang --target=aarch64-linux-gnu" HOSTCXX="ccache clang++" PYTHON=python3 O=out KCFLAGS=-Wno-error -j$(nproc --all)
           echo "内核编译完成！"
          
       - name: 应用patch_linux并修补内核
