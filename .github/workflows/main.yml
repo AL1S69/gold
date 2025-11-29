@@ -122,8 +122,9 @@ jobs:
         run: |
           rm -rf kernel_workspace && mkdir kernel_workspace && cd kernel_workspace
           echo "正在拉取clang工具链..."
-          wget https://github.com/llvm/llvm-project/releases/download/llvmorg-12.0.1/clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz
-          tar -xf clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz && mv $(ls -d clang+llvm*) xinran-clang12
+          wget -c https://github.com/llvm/llvm-project/releases/download/llvmorg-12.0.1/clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+          tar -xf clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz
+          mv $(ls -d *12.0.1*) xinran-clang12
           echo "正在克隆源码仓库..."
           git clone --depth=1 https://github.com/Winkmoon/xinran_kernel_xiaomi_diting -b master common
           echo "正在去除 ABI 保护 & 去除 dirty 后缀..."
