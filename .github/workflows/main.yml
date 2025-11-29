@@ -124,7 +124,8 @@ jobs:
           echo "正在拉取clang工具链..."
           wget -c https://github.com/llvm/llvm-project/releases/download/llvmorg-12.0.1/clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz
           tar -xf clang+llvm-12.0.1-x86_64-linux-gnu-ubuntu-16.04.tar.xz
-          mv $(ls -d *12.0.1*) xinran-clang12
+          ls
+          mv $(ls -d *12.0.1*) xinranclang12
           echo "正在克隆源码仓库..."
           git clone --depth=1 https://github.com/Winkmoon/xinran_kernel_xiaomi_diting -b master common
           echo "正在去除 ABI 保护 & 去除 dirty 后缀..."
@@ -344,7 +345,7 @@ jobs:
       - name: 构建内核
         run: |
           cd kernel_workspace
-          cd xinran-clang12
+          cd xinranclang12
           export PATH=$(pwd)/bin:$PATH
           export KBUILD_BUILD_USER=XinRan♡
           export KBUILD_BUILD_HOST=Bai
