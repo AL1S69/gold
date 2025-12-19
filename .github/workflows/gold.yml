@@ -1,51 +1,48 @@
-name: Build gold GKI Kernel (zako~kernel)
+name: Full-Core Build gold GKI Kernel (zako~kernel)
 
 on:
-  workflow_dispatch: # 仅手动触发编译
+  workflow_dispatch:
 
 jobs:
   build_kernel:
     runs-on: ubuntu-22.04
     steps:
-      - name: 1. 安装基础编译依赖
+      - name: 1. 极速安装核心依赖
         run: |
-          sudo apt update && sudo apt install -y git make bison flex gcc-aarch64-linux-gnu bc libssl-dev libelf-dev python3 curl liblz4-tool zstd
-          sudo apt clean
+          apt-get update -y && apt-get install -y --no-install-recommends \
+            git make bison flex gcc-aarch64-linux-gnu bc libssl-dev libelf-dev \
+            python3 curl liblz4-tool zstd clang lld llvm
+          apt-get clean && rm -rf /var/lib/apt/lists/*
 
-      - name: 2. 拉取Fork仓库源码
+      - name: 2. 浅克隆Fork仓库源码
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
           ref: master
 
-      - name: 3. 下载Clang-r547379工具链
+      - name: 3. 缓存Clang工具链（避免重复下载）
+        id: cache-clang
+        uses: actions/cache@v3
+        with:
+          path: ./clang-r547379
+          key: clang-r547379-gki510
+
+      - name: 4. 下载Clang工具链（缓存未命中时执行）
+        if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
-          wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz
-          mkdir clang-r547379 && tar zxf clang-r547379.tar.gz -C clang-r547379
-          echo "CLANG_DIR=$(pwd)/clang-r547379" >> $GITHUB_ENV
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz -O clang.tar.gz
+          mkdir clang-r547379 && tar zxf clang.tar.gz -C clang-r547379 --skip-old-files
+          rm -f clang.tar.gz
+
+      - name: 5. 快速修改内核名
+        run: |
+          sed -i "s/LOCALVERSION=.*/LOCALVERSION=-zako~kernel/" Makefile
           echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
+          echo "CLANG_DIR=$(pwd)/clang-r547379" >> $GITHUB_ENV
+          # 输出核心数，便于日志查看
+          echo "使用$(nproc)核心编译"
 
-      - name: 4. 集成SukiSU-Ultra（GKI 5.10分支，自动配置）
-        run: |
-          cd ${{ env.KERNEL_DIR }}
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s gki-5.10
-          [ -d "KernelSU" ] && echo "SUKISU集成成功" || exit 1
-
-      - name: 5. 修改内核名（改为-zako~kernel）
-        run: |
-          sed -i "s/LOCALVERSION=.*/LOCALVERSION=-zako~kernel/" ${{ env.KERNEL_DIR }}/Makefile
-
-      - name: 6. 添加C99编译标准支持（解决SUKISU语法错误）
-        run: |
-          cd ${{ env.KERNEL_DIR }}
-          # 给KernelSU的KPM模块添加C99编译标志
-          echo 'EXTRA_CFLAGS += -std=c99' >> drivers/kernelsu/kpm/Makefile
-          # 给整个内核编译添加C99兼容标志
-          echo 'KBUILD_CFLAGS += -std=gnu99' >> Makefile
-          # 修复Clang的GCC兼容警告
-          echo 'KBUILD_CFLAGS += -Wno-gcc-compat' >> Makefile
-
-      - name: 7. 编译GKI内核（GKI 5.10适配）
+      - name: 6. 全核心编译内核（最大化利用CPU）
         run: |
           cd ${{ env.KERNEL_DIR }}
           export ARCH=arm64
@@ -59,22 +56,23 @@ jobs:
           export OBJCOPY=${{ env.CLANG_DIR }}/bin/llvm-objcopy
           export OBJDUMP=${{ env.CLANG_DIR }}/bin/llvm-objdump
           
-          # 禁用LTO避免兼容问题
+          # 全核心编译参数
           export KBUILD_LTO=none
+          export KBUILD_VERBOSE=0 # 关闭冗余日志
+          export MAKEFLAGS="-j$(nproc)" # 调用全部CPU核心
           
-          # 基础配置与编译
-          make O=out ARCH=arm64 gki_defconfig
-          yes "" | make O=out ARCH=arm64 olddefconfig
-          make -j$(nproc) O=out ARCH=arm64 Image.gz-dtb
+          # 静默执行配置，直接全核心编译
+          make O=out ARCH=arm64 gki_defconfig > /dev/null 2>&1
+          make -j$(nproc) O=out ARCH=arm64 Image.gz-dtb > build.log 2>&1 || (cat build.log && exit 1)
           
-          # 归集产物
+          # 归集核心产物
           mkdir -p boot
           cp -r out/arch/arm64/boot/* boot/
           ls -l boot/
 
-      - name: 8. 上传boot产物
+      - name: 7. 上传boot目录所有产物
         uses: actions/upload-artifact@v4
         with:
-          name: zako~kernel-diting-gki-boot
+          name: zako~kernel-diting-gki-fullcore
           path: ${{ env.KERNEL_DIR }}/boot/**/*
-          retention-days: 14
+          retention-days: 7
