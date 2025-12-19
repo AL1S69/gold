@@ -43,14 +43,22 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
           [ -d "KernelSU" ] && echo "SUKISU集成成功" || exit 1
 
-      - name: 6. 修改内核名（-zako~kernel）
+      - name: 6. 为KPM模块添加C99编译标志（核心修复）
+        run: |
+          cd ${{ env.KERNEL_DIR }}
+          # 为SUKISU的KPM模块Makefile添加C99编译标准
+          echo 'EXTRA_CFLAGS += -std=c99 -Wno-gcc-compat' >> drivers/kernelsu/kpm/Makefile
+          # 为整个内核添加C99兼容标志
+          echo 'KBUILD_CFLAGS += -std=gnu99' >> Makefile
+
+      - name: 7. 修改内核名（-zako~kernel）
         run: |
           sed -i "s/LOCALVERSION=.*/LOCALVERSION=-zako~kernel/" ${{ env.KERNEL_DIR }}/Makefile
 
-      - name: 7. 配置GKI+SUKISU（修复路径与配置生成）
+      - name: 8. 配置GKI+SUKISU（修复路径与配置生成）
         run: |
           cd ${{ env.KERNEL_DIR }}
-          # 1. 分步创建临时配置文件
+          # 分步创建临时配置文件
           echo "CONFIG_KALLSYMS=y" > sukisu_temp.config
           echo "CONFIG_KALLSYMS_ALL=y" >> sukisu_temp.config
           echo "CONFIG_KPROBES=y" >> sukisu_temp.config
@@ -63,17 +71,17 @@ jobs:
           echo "CONFIG_MODULE_UNLOAD=y" >> sukisu_temp.config
           echo "CONFIG_DEBUG_INFO_BTF=y" >> sukisu_temp.config
           
-          # 2. 先创建out目录，确保配置文件生成路径存在
+          # 先创建out目录
           mkdir -p out
-          # 3. 加载GKI基础配置（先生成基础.config）
+          # 加载基础配置
           make O=out ARCH=arm64 gki_defconfig
-          # 4. 融合SUKISU配置并固化
+          # 追加并固化SUKISU配置
           cat sukisu_temp.config >> out/.config
           yes "" | make O=out ARCH=arm64 olddefconfig
-          # 5. 验证配置（补全完整路径）
+          # 验证配置
           grep -E "CONFIG_KSU=y|CONFIG_KPM=y" ${{ env.KERNEL_DIR }}/out/.config || (echo "SUKISU配置失效" && exit 1)
 
-      - name: 8. 全核心编译GKI内核+DTB
+      - name: 9. 全核心编译GKI内核+DTB
         run: |
           cd ${{ env.KERNEL_DIR }}
           export ARCH=arm64
@@ -95,7 +103,7 @@ jobs:
           cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
           ls -l ${{ env.KERNEL_DIR }}/boot/
 
-      - name: 9. 上传编译产物
+      - name: 10. 上传编译产物
         uses: actions/upload-artifact@v4
         with:
           name: zako~kernel-gki510-lts-sukisu
