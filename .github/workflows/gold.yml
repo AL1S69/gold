@@ -31,11 +31,21 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s gki-5.10
           [ -d "KernelSU" ] && echo "SUKISU集成成功" || exit 1
 
-      - name: 5. 修改内核名（仅保留此功能，改为-zako~kernel）
+      - name: 5. 修改内核名（改为-zako~kernel）
         run: |
           sed -i "s/LOCALVERSION=.*/LOCALVERSION=-zako~kernel/" ${{ env.KERNEL_DIR }}/Makefile
 
-      - name: 6. 编译GKI内核（GKI 5.10适配）
+      - name: 6. 添加C99编译标准支持（解决SUKISU语法错误）
+        run: |
+          cd ${{ env.KERNEL_DIR }}
+          # 给KernelSU的KPM模块添加C99编译标志
+          echo 'EXTRA_CFLAGS += -std=c99' >> drivers/kernelsu/kpm/Makefile
+          # 给整个内核编译添加C99兼容标志
+          echo 'KBUILD_CFLAGS += -std=gnu99' >> Makefile
+          # 修复Clang的GCC兼容警告
+          echo 'KBUILD_CFLAGS += -Wno-gcc-compat' >> Makefile
+
+      - name: 7. 编译GKI内核（GKI 5.10适配）
         run: |
           cd ${{ env.KERNEL_DIR }}
           export ARCH=arm64
@@ -62,7 +72,7 @@ jobs:
           cp -r out/arch/arm64/boot/* boot/
           ls -l boot/
 
-      - name: 7. 上传boot产物
+      - name: 8. 上传boot产物
         uses: actions/upload-artifact@v4
         with:
           name: zako~kernel-diting-gki-boot
