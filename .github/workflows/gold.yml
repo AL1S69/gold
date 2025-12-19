@@ -1,4 +1,4 @@
-name: Full-Core Build gold GKI Kernel (zako~kernel)
+name: Build GKI 5.10 LTS Kernel (zako~kernel+SUKISU)
 
 on:
   workflow_dispatch:
@@ -7,41 +7,71 @@ jobs:
   build_kernel:
     runs-on: ubuntu-22.04
     steps:
-      - name: 1. 极速安装核心依赖（添加sudo权限）
+      - name: 1. 安装编译依赖
         run: |
           sudo apt-get update -y && sudo apt-get install -y --no-install-recommends \
             git make bison flex gcc-aarch64-linux-gnu bc libssl-dev libelf-dev \
-            python3 curl liblz4-tool zstd clang lld llvm
+            python3 curl liblz4-tool zstd clang lld llvm libncurses5-dev
           sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
 
-      - name: 2. 浅克隆Fork仓库源码
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          ref: master
+      - name: 2. 克隆官方GKI 5.10 LTS源码
+        run: |
+          git clone -b android12-5.10-lts --depth=1 https://android.googlesource.com/kernel/common GKI5.10
+          cd GKI5.10
+          git submodule update --init --depth=1
+          echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
 
-      - name: 3. 缓存Clang工具链（避免重复下载）
+      - name: 3. 缓存Clang工具链
         id: cache-clang
         uses: actions/cache@v3
         with:
-          path: ./clang-r547379
-          key: clang-r547379-gki510
+          path: ./GKI5.10/clang-r547379
+          key: clang-r547379-gki510-lts
 
-      - name: 4. 下载Clang工具链（缓存未命中时执行）
+      - name: 4. 下载Clang（缓存未命中）
         if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
+          cd ${{ env.KERNEL_DIR }}
           wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz -O clang.tar.gz
           mkdir -p clang-r547379 && tar zxf clang.tar.gz -C clang-r547379 --skip-old-files
           rm -f clang.tar.gz
-
-      - name: 5. 快速修改内核名
-        run: |
-          sed -i "s/LOCALVERSION=.*/LOCALVERSION=-zako~kernel/" Makefile
-          echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
           echo "CLANG_DIR=$(pwd)/clang-r547379" >> $GITHUB_ENV
-          echo "使用$(nproc)核心编译"
 
-      - name: 6. 全核心编译内核（改为Image目标）
+      - name: 5. 集成SukiSU-Ultra（main分支）
+        run: |
+          cd ${{ env.KERNEL_DIR }}
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          [ -d "KernelSU" ] && echo "SUKISU集成成功" || exit 1
+
+      - name: 6. 修改内核名（-zako~kernel）
+        run: |
+          sed -i "s/LOCALVERSION=.*/LOCALVERSION=-zako~kernel/" ${{ env.KERNEL_DIR }}/Makefile
+
+      - name: 7. 配置GKI+SUKISU（分步写入配置，无EOF）
+        run: |
+          cd ${{ env.KERNEL_DIR }}
+          # 分步创建临时配置文件，彻底规避EOF语法问题
+          echo "CONFIG_KALLSYMS=y" > sukisu_temp.config
+          echo "CONFIG_KALLSYMS_ALL=y" >> sukisu_temp.config
+          echo "CONFIG_KPROBES=y" >> sukisu_temp.config
+          echo "CONFIG_HAVE_KPROBES=y" >> sukisu_temp.config
+          echo "CONFIG_KPROBE_EVENTS=y" >> sukisu_temp.config
+          echo "CONFIG_KSU=y" >> sukisu_temp.config
+          echo "CONFIG_KPM=y" >> sukisu_temp.config
+          echo "CONFIG_CC_STD_C99=y" >> sukisu_temp.config
+          echo "CONFIG_MODULES=y" >> sukisu_temp.config
+          echo "CONFIG_MODULE_UNLOAD=y" >> sukisu_temp.config
+          echo "CONFIG_DEBUG_INFO_BTF=y" >> sukisu_temp.config
+          
+          # 环境变量注入配置
+          export KCONFIG_CONFIG="${{ env.KERNEL_DIR }}/sukisu_temp.config"
+          export KCONFIG_OVERRIDE="$KCONFIG_CONFIG"
+          # 加载并融合配置
+          make O=out ARCH=arm64 gki_defconfig KCONFIG_ALLCONFIG="$KCONFIG_CONFIG"
+          # 验证配置
+          grep -E "CONFIG_KSU=y|CONFIG_KPM=y" out/.config || (echo "SUKISU配置失效" && exit 1)
+
+      - name: 8. 全核心编译GKI内核+DTB
         run: |
           cd ${{ env.KERNEL_DIR }}
           export ARCH=arm64
@@ -52,25 +82,20 @@ jobs:
           export LD=${{ env.CLANG_DIR }}/bin/ld.lld
           export AR=${{ env.CLANG_DIR }}/bin/llvm-ar
           export NM=${{ env.CLANG_DIR }}/bin/llvm-nm
-          export OBJCOPY=${{ env.CLANG_DIR }}/bin/llvm-objcopy
-          export OBJDUMP=${{ env.CLANG_DIR }}/bin/llvm-objdump
+          export OBJCOPY=${{ env.CLANG_DIR }}/bin/objcopy
+          export OBJDUMP=${{ env.CLANG_DIR }}/bin/objdump
           
           export KBUILD_LTO=none
-          export KBUILD_VERBOSE=0
           export MAKEFLAGS="-j$(nproc)"
+          make -j$(nproc) O=out ARCH=arm64 Image dtbs > build.log 2>&1 || (cat build.log && exit 1)
           
-          # 编译内核支持的Image目标（替代Image.gz-dtb）
-          make O=out ARCH=arm64 gki_defconfig > /dev/null 2>&1
-          make -j$(nproc) O=out ARCH=arm64 Image > build.log 2>&1 || (cat build.log && exit 1)
-          
-          # 归集产物（Image在arch/arm64/boot目录下）
-          mkdir -p boot
-          cp -r out/arch/arm64/boot/* boot/
-          ls -l boot/
+          mkdir -p ${{ env.KERNEL_DIR }}/boot
+          cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
+          ls -l ${{ env.KERNEL_DIR }}/boot/
 
-      - name: 7. 上传boot目录所有产物
+      - name: 9. 上传编译产物
         uses: actions/upload-artifact@v4
         with:
-          name: zako~kernel-diting-gki-fullcore
+          name: zako~kernel-gki510-lts-sukisu
           path: ${{ env.KERNEL_DIR }}/boot/**/*
-          retention-days: 7
+          retention-days: 14
