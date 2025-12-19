@@ -7,12 +7,12 @@ jobs:
   build_kernel:
     runs-on: ubuntu-22.04
     steps:
-      - name: 1. 极速安装核心依赖
+      - name: 1. 极速安装核心依赖（添加sudo权限）
         run: |
-          apt-get update -y && apt-get install -y --no-install-recommends \
+          sudo apt-get update -y && sudo apt-get install -y --no-install-recommends \
             git make bison flex gcc-aarch64-linux-gnu bc libssl-dev libelf-dev \
             python3 curl liblz4-tool zstd clang lld llvm
-          apt-get clean && rm -rf /var/lib/apt/lists/*
+          sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
 
       - name: 2. 浅克隆Fork仓库源码
         uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
         if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
           wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz -O clang.tar.gz
-          mkdir clang-r547379 && tar zxf clang.tar.gz -C clang-r547379 --skip-old-files
+          mkdir -p clang-r547379 && tar zxf clang.tar.gz -C clang-r547379 --skip-old-files
           rm -f clang.tar.gz
 
       - name: 5. 快速修改内核名
