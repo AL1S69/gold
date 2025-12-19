@@ -43,22 +43,24 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
           [ -d "KernelSU" ] && echo "SUKISU集成成功" || exit 1
 
-      - name: 6. 为KPM模块添加C99编译标志（核心修复）
+      - name: 6. 仅为SUKISU模块启用C99（核心修复，不影响内核全局）
         run: |
           cd ${{ env.KERNEL_DIR }}
-          # 为SUKISU的KPM模块Makefile添加C99编译标准
-          echo 'EXTRA_CFLAGS += -std=c99 -Wno-gcc-compat' >> drivers/kernelsu/kpm/Makefile
-          # 为整个内核添加C99兼容标志
-          echo 'KBUILD_CFLAGS += -std=gnu99' >> Makefile
+          # 为KPM模块Makefile添加C99编译标志
+          echo 'EXTRA_CFLAGS += -std=c99 -Wno-gcc-compat -Wno-unused-command-line-argument' >> drivers/kernelsu/kpm/Makefile
+          # 为SUKISU主模块添加兼容标志
+          echo 'EXTRA_CFLAGS += -Wno-type-limits -Wno-pointer-arith' >> drivers/kernelsu/Makefile
+          # 移除全局C99配置（避免内核宏冲突）
+          sed -i '/KBUILD_CFLAGS += -std=gnu99/d' Makefile 2>/dev/null
 
       - name: 7. 修改内核名（-zako~kernel）
         run: |
           sed -i "s/LOCALVERSION=.*/LOCALVERSION=-zako~kernel/" ${{ env.KERNEL_DIR }}/Makefile
 
-      - name: 8. 配置GKI+SUKISU（修复路径与配置生成）
+      - name: 8. 配置GKI+SUKISU（移除全局C99配置项）
         run: |
           cd ${{ env.KERNEL_DIR }}
-          # 分步创建临时配置文件
+          # 分步创建临时配置文件（删除CONFIG_CC_STD_C99=y）
           echo "CONFIG_KALLSYMS=y" > sukisu_temp.config
           echo "CONFIG_KALLSYMS_ALL=y" >> sukisu_temp.config
           echo "CONFIG_KPROBES=y" >> sukisu_temp.config
@@ -66,7 +68,6 @@ jobs:
           echo "CONFIG_KPROBE_EVENTS=y" >> sukisu_temp.config
           echo "CONFIG_KSU=y" >> sukisu_temp.config
           echo "CONFIG_KPM=y" >> sukisu_temp.config
-          echo "CONFIG_CC_STD_C99=y" >> sukisu_temp.config
           echo "CONFIG_MODULES=y" >> sukisu_temp.config
           echo "CONFIG_MODULE_UNLOAD=y" >> sukisu_temp.config
           echo "CONFIG_DEBUG_INFO_BTF=y" >> sukisu_temp.config
@@ -81,7 +82,7 @@ jobs:
           # 验证配置
           grep -E "CONFIG_KSU=y|CONFIG_KPM=y" ${{ env.KERNEL_DIR }}/out/.config || (echo "SUKISU配置失效" && exit 1)
 
-      - name: 9. 全核心编译GKI内核+DTB
+      - name: 9. 全核心编译GKI内核+DTB（添加Clang兼容参数）
         run: |
           cd ${{ env.KERNEL_DIR }}
           export ARCH=arm64
@@ -95,8 +96,11 @@ jobs:
           export OBJCOPY=${{ env.CLANG_DIR }}/bin/objcopy
           export OBJDUMP=${{ env.CLANG_DIR }}/bin/objdump
           
+          # 添加Clang兼容编译参数，解决typeof关键字问题
+          export KBUILD_CFLAGS="-Wno-error=unknown-warning-option -Wno-error=typeof"
           export KBUILD_LTO=none
           export MAKEFLAGS="-j$(nproc)"
+          
           make -j$(nproc) O=out ARCH=arm64 Image dtbs > build.log 2>&1 || (cat build.log && exit 1)
           
           mkdir -p ${{ env.KERNEL_DIR }}/boot
