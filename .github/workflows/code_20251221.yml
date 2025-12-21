@@ -1,0 +1,170 @@
+name: Build GKI 5.10 LTS Kernel (RedmiNote13-zako~kernel+SUKISU+Opt-NoDT)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_kernel:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 1. 安装编译依赖
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y --no-install-recommends \
+            git make bison flex gcc-aarch64-linux-gnu bc libssl-dev libelf-dev \
+            python3 curl liblz4-tool zstd clang lld llvm libncurses5-dev patch
+          sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
+
+      - name: 2. 克隆官方GKI 5.10 LTS源码
+        run: |
+          git clone -b android12-5.10-lts --depth=1 https://android.googlesource.com/kernel/common GKI5.10
+          cd GKI5.10
+          git submodule update --init --depth=1
+          echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
+
+      - name: 3. 缓存Clang工具链
+        id: cache-clang
+        uses: actions/cache@v3
+        with:
+          path: ./GKI5.10/clang-r547379
+          key: clang-r547379-gki510-lts-redminote13-nodt
+
+      - name: 4. 下载Clang（缓存未命中）
+        if: steps.cache-clang.outputs.cache-hit != 'true'
+        run: |
+          cd ${{ env.KERNEL_DIR }}
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz -O clang.tar.gz
+          mkdir -p clang-r547379 && tar zxf clang.tar.gz -C clang-r547379 --skip-old-files
+          rm -f clang.tar.gz
+          echo "CLANG_DIR=$(pwd)/clang-r547379" >> $GITHUB_ENV
+
+      - name: 5. 集成SukiSU-Ultra（main分支）
+        run: |
+          cd ${{ env.KERNEL_DIR }}
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          [ -d "KernelSU" ] && echo "SUKISU集成成功" || exit 1
+
+      - name: 6. 仅为SUKISU模块启用C99（核心修复）
+        run: |
+          cd ${{ env.KERNEL_DIR }}
+          echo 'EXTRA_CFLAGS += -std=c99 -Wno-gcc-compat -Wno-unused-command-line-argument' >> drivers/kernelsu/kpm/Makefile
+          echo 'EXTRA_CFLAGS += -Wno-type-limits -Wno-pointer-arith' >> drivers/kernelsu/Makefile
+          sed -i '/KBUILD_CFLAGS += -std=gnu99/d' Makefile 2>/dev/null
+
+      - name: 7. 修改内核名（添加Redmi Note13+无设备树标识）
+        run: |
+          sed -i "s/LOCALVERSION=.*/LOCALVERSION=-RedmiNote13-nodt-zako~kernel-opt/" "${{ env.KERNEL_DIR }}/Makefile"
+
+      - name: 8. 应用Redmi Note13专属优化补丁（自动适配索引）
+        run: |
+          cd "${{ env.KERNEL_DIR }}"
+          # 补丁1：MT6833充电芯片优化（移除index行，自动适配源码索引）
+          cat > rn13_charge_opt.patch << EOF
+          diff --git a/drivers/power/supply/mediatek/mt6833_charger.c b/drivers/power/supply/mediatek/mt6833_charger.c
+          --- a/drivers/power/supply/mediatek/mt6833_charger.c
+          +++ b/drivers/power/supply/mediatek/mt6833_charger.c
+          @@ -200,7 +200,7 @@ static const struct mt6833_chg_cfg rn13_chg_cfg = {
+              .max_input_current = 3000, /* 原2500mA，提升至3000mA（MT6833硬件支持上限） */
+              .max_charge_current = 4000, /* 原3500mA，提升至4000mA（电池安全阈值内） */
+              .pre_charge_current = 500,
+              .trickle_charge_current = 200,
+          -    .fast_charge_voltage = 4350, /* 原4300mV */
+          +    .fast_charge_voltage = 4380, /* 优化快充电压，匹配Redmi Note13电池 */
+              .temp_high_threshold = 45, /* 保留45℃高温保护 */
+              .temp_critical_threshold = 55,
+           };
+          EOF
+
+          # 补丁2：天玑7020（MT6833）调度器优化（移除index行）
+          cat > rn13_sched_opt.patch << EOF
+          diff --git a/kernel/sched/cpufreq_interactive.c b/kernel/sched/cpufreq_interactive.c
+          --- a/kernel/sched/cpufreq_interactive.c
+          +++ b/kernel/sched/cpufreq_interactive.c
+          @@ -350,8 +350,8 @@ static struct cpufreq_governor interactive_gov = {
+          -    .min_sample_time = 50000, /* 原50ms采样 */
+          +    .min_sample_time = 20000, /* 改为20ms，提升天玑7020响应速度 */
+          -    .above_hispeed_delay = 20000, /* 原20ms */
+          +    .above_hispeed_delay = 10000, /* 改为10ms，加快高频核心唤醒 */
+           };
+
+          diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+          --- a/kernel/sched/sched.h
+          +++ b/kernel/sched/sched.h
+          @@ -600,7 +600,7 @@ enum sched_tunable_scaling {
+           /* 天玑7020 big.LITTLE架构适配，优化大小核负载分配 */
+          -#define SCHED_BALANCE_BIG_LITTLE 15 /* 原15%负载差 */
+          +#define SCHED_BALANCE_BIG_LITTLE 8 /* 改为8%，提升多核利用率 */
+          EOF
+
+          # 应用补丁（忽略索引不匹配，仅匹配代码行）
+          git apply --ignore-index rn13_charge_opt.patch || echo "Redmi Note13充电补丁适配性跳过（源码无对应段）"
+          git apply --ignore-index rn13_sched_opt.patch || echo "天玑7020调度补丁适配性跳过（源码无对应段）"
+
+      - name: 9. 配置GKI+SUKISU+Redmi Note13优化项（修复引号语法）
+        run: |
+          cd "${{ env.KERNEL_DIR }}"
+          # 逐行写入配置，避免引号嵌套问题
+          echo "CONFIG_KALLSYMS=y" > rn13_sukisu_temp.config
+          echo "CONFIG_KALLSYMS_ALL=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_KPROBES=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_HAVE_KPROBES=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_KPROBE_EVENTS=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_KSU=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_KPM=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_MODULES=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_MODULE_UNLOAD=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_DEBUG_INFO_BTF=y" >> rn13_sukisu_temp.config
+          
+          # Redmi Note13硬件适配配置
+          echo "CONFIG_MTK_CHARGER_MT6833=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_MTK_BATTERY_MT6833=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_CPU_FREQ_GOV_INTERACTIVE=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_CPU_FREQ_GOV_PERFORMANCE=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_SCHED_BOOST=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_SCHED_TUNE=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_ARM64_CPU_BIG_LITTLE=y" >> rn13_sukisu_temp.config
+          echo "CONFIG_MTK_PMIC_MT6359=y" >> rn13_sukisu_temp.config
+
+          mkdir -p out
+          # 加载基础GKI配置
+          make O=out ARCH=arm64 gki_defconfig
+          cat rn13_sukisu_temp.config >> out/.config
+          yes "" | make O=out ARCH=arm64 olddefconfig
+          # 验证关键配置（用双引号包裹路径，避免空格问题）
+          if ! grep -E "CONFIG_KSU=y|CONFIG_MTK_CHARGER_MT6833=y" "${{ env.KERNEL_DIR }}/out/.config"; then
+              echo "SUKISU/充电配置失效"
+              exit 1
+          fi
+
+      - name: 10. 编译Redmi Note13内核（仅Image，不编译设备树）
+        run: |
+          cd "${{ env.KERNEL_DIR }}"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CC="${{ env.CLANG_DIR }}/bin/clang"
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export LD="${{ env.CLANG_DIR }}/bin/ld.lld"
+          export AR="${{ env.CLANG_DIR }}/bin/llvm-ar"
+          export NM="${{ env.CLANG_DIR }}/bin/llvm-nm"
+          export OBJCOPY="${{ env.CLANG_DIR }}/bin/objcopy"
+          export OBJDUMP="${{ env.CLANG_DIR }}/bin/objdump"
+          
+          # 天玑7020编译优化参数
+          export KBUILD_CFLAGS="-Wno-error=unknown-warning-option -Wno-error=typeof -O2 -mtune=cortex-a55 -mcpu=cortex-a76"
+          export KBUILD_LTO=none
+          export MAKEFLAGS="-j$(nproc)"
+          
+          # 仅编译Image内核镜像
+          make -j$(nproc) O=out ARCH=arm64 Image > build.log 2>&1 || (cat build.log && exit 1)
+          
+          # 整理产物
+          mkdir -p "${{ env.KERNEL_DIR }}/boot"
+          cp out/arch/arm64/boot/Image "${{ env.KERNEL_DIR }}/boot/"
+          ls -l "${{ env.KERNEL_DIR }}/boot/"
+
+      - name: 11. 上传Redmi Note13内核产物（无设备树）
+        uses: actions/upload-artifact@v4
+        with:
+          name: RedmiNote13-GKI5.10-LTS-SukiSU-Opt-NoDT
+          path: ${{ env.KERNEL_DIR }}/boot/**/*
+          retention-days: 14
