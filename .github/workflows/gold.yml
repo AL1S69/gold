@@ -63,7 +63,7 @@ jobs:
           rm -rf out
           mkdir -p out
           # 第一步：载入gki_defconfig预设配置
-          make O=out ARCH=arm64 gki_defconfig
+          make O=out ARCH=arm64 defconfig
           # 第二步：按照报错提示，执行oldconfig类命令，生成out目录内的.config文件
           make O=out ARCH=arm64 olddefconfig
       - name: 9. 全核心编译GKI内核+DTB（添加Clang兼容参数）
