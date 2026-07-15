@@ -16,7 +16,7 @@ jobs:
 
       - name: 2. 克隆官方GKI 5.10 LTS源码
         run: |
-          git clone -b android12-5.10-lts --depth=1 https://android.googlesource.com/kernel/common GKI5.10
+         git clone --depth=1 https://github.com/lolipuru/kernel_fuxi-mainline.git GKI5.10
           cd GKI5.10
           git submodule update --init --depth=1
           echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
