@@ -75,7 +75,7 @@ jobs:
           # 先创建out目录
           mkdir -p out
           # 加载基础配置
-          make O=out ARCH=arm64 gki_defconfig
+          make O=out ARCH=arm64 fuxi.config
           # 追加并固化SUKISU配置
           cat sukisu_temp.config >> out/.config
           yes "" | make O=out ARCH=arm64 olddefconfig
