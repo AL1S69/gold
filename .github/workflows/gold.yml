@@ -63,7 +63,7 @@ jobs:
           # 先创建out目录
           mkdir -p out
           # 加载基础配置
-          make O=out ARCH=arm64 fuxi.config
+          make O=out ARCH=arm64 CONFIGS=fuxi.config
           
           
       - name: 9. 全核心编译GKI内核+DTB（添加Clang兼容参数）
