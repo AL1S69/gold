@@ -62,7 +62,7 @@ jobs:
           cd ${{ env.KERNEL_DIR }}
           mkdir -p out
           # 读取fuxi机型配置，并导出为编译用的.config
-          make O=out ARCH=arm64 CONFIGS=fuxi.config olddefconfig
+          make O=out ARCH=arm64 gki_defconfig
           
       - name: 9. 全核心编译GKI内核+DTB（添加Clang兼容参数）
         run: |
