@@ -60,11 +60,9 @@ jobs:
       - name: 8. 配置GKI+SUKISU（移除全局C99配置项）
         run: |
           cd ${{ env.KERNEL_DIR }}
-          # 先创建out目录
           mkdir -p out
-          # 加载基础配置
-          make O=out ARCH=arm64 CONFIGS=fuxi.config
-          
+          # 读取fuxi机型配置，并导出为编译用的.config
+          make O=out ARCH=arm64 CONFIGS=fuxi.config olddefconfig
           
       - name: 9. 全核心编译GKI内核+DTB（添加Clang兼容参数）
         run: |
