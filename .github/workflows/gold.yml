@@ -68,6 +68,7 @@ jobs:
           make O=out ARCH=arm64 olddefconfig
       - name: 9. 全核心编译GKI内核+DTB（添加Clang兼容参数）
         run: |
+          set -xe
           cd ${{ env.KERNEL_DIR }}
           export ARCH=arm64
           export SUBARCH=arm64
@@ -76,19 +77,22 @@ jobs:
           export LD=${{ env.CLANG_DIR }}/bin/ld.lld
           export AR=${{ env.CLANG_DIR }}/bin/llvm-ar
           export NM=${{ env.CLANG_DIR }}/bin/llvm-nm
-          export OBJCOPY=${{ env.CLANG_DIR }}/bin/objcopy
-          export OBJDUMP=${{ env.CLANG_DIR }}/bin/objdump
+          # 修复1：objcopy/objdump 改为llvm原版工具名
+          export OBJCOPY=${{ env.CLANG_DIR }}/bin/llvm-objcopy
+          export OBJDUMP=${{ env.CLANG_DIR }}/bin/llvm-objdump
           # 强制主机编译工具使用Clang，彻底禁用系统gcc
           export HOSTCC=${{ env.CLANG_DIR }}/bin/clang
           export HOSTCXX=${{ env.CLANG_DIR }}/bin/clang++
           export HOSTLD=${{ env.CLANG_DIR }}/bin/ld.lld
           export HOSTAR=${{ env.CLANG_DIR }}/bin/llvm-ar
-          # 添加Clang兼容编译参数，解决typeof关键字问题
-          export KBUILD_CFLAGS="-Wno-error=unknown-warning-option -Wno-error=typeof"
+          # 修复2：KBUILD_CFLAGS 改为KCFLAGS，防止参数污染HOST gcc，追加gnu99标准
+          export KCFLAGS="-std=gnu99 -Wno-error=unknown-warning-option -Wno-error=typeof"
           export KBUILD_LTO=none
           export MAKEFLAGS="-j$(nproc)"
           
-          make -j$(nproc) O=out ARCH=arm64 Image dtbs > build.log 2>&1 || (cat build.log && exit 1)
+          # 修复3：编译命令兜底指定HOST工具，避免环境变量失效
+          make O=out gki_defconfig
+          make -j$(nproc) O=out ARCH=arm64 Image dtbs HOSTCC=$HOSTCC HOSTCXX=$HOSTCXX > build.log 2>&1 || (cat build.log && exit 1)
           
           mkdir -p ${{ env.KERNEL_DIR }}/boot
           cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
