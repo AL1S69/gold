@@ -7,8 +7,8 @@ jobs:
   build_kernel:
     runs-on: ubuntu-22.04
     steps:
-      - name: 1. 安装编译依赖
-        run: |
+     - name: 1. 安装编译依赖
+       run: |
           sudo apt-get update -y && sudo apt-get install -y --no-install-recommends \
             git make bison flex gcc-aarch64-linux-gnu bc libssl-dev libelf-dev \
             python3 curl liblz4-tool zstd clang lld llvm libncurses5-dev
@@ -66,8 +66,8 @@ jobs:
           make O=out ARCH=arm64 defconfig
           # 第二步：按照报错提示，执行oldconfig类命令，生成out目录内的.config文件
           make O=out ARCH=arm64 olddefconfig
-       - name: 9. 全核心编译GKI 5.15内核+DTB（LLVM21）
-         run: |
+     - name: 9. 全核心编译GKI 5.15内核+DTB（LLVM21）
+      run: |
         set -xe
         cd ${{ env.KERNEL_DIR }}
 
@@ -78,43 +78,43 @@ jobs:
         export LLVM=1
         export LLVM_IAS=1
 
-       # Clang工具链
-       export CC=${{ env.CLANG_DIR }}/bin/clang
-       export CXX=${{ env.CLANG_DIR }}/bin/clang++
+        # Clang工具链
+        export CC=${{ env.CLANG_DIR }}/bin/clang
+        export CXX=${{ env.CLANG_DIR }}/bin/clang++
    
-      # HOST使用LLVM
-       export HOSTCC=${{ env.CLANG_DIR }}/bin/clang
-       export HOSTCXX=${{ env.CLANG_DIR }}/bin/clang++
+        # HOST使用LLVM
+        export HOSTCC=${{ env.CLANG_DIR }}/bin/clang
+        export HOSTCXX=${{ env.CLANG_DIR }}/bin/clang++
 
-       # 保留你的HOST清理
-       export KBUILD_HOST_CFLAGS=""
-       export KBUILD_HOST_CXXFLAGS=""
-       export KBUILD_HOST_LDFLAGS=""
+        # 保留你的HOST清理
+        export KBUILD_HOST_CFLAGS=""
+        export KBUILD_HOST_CXXFLAGS=""
+        export KBUILD_HOST_LDFLAGS=""
+ 
+        unset CFLAGS
+        unset CXXFLAGS
+        unset LDFLAGS
 
-       unset CFLAGS
-       unset CXXFLAGS
-       unset LDFLAGS
+        # 保留你的KCFLAGS
+        export KCFLAGS="-std=gnu99 -Wno-error=unknown-warning-option -Wno-error=typeof"
 
-       # 保留你的KCFLAGS
-       export KCFLAGS="-std=gnu99 -Wno-error=unknown-warning-option -Wno-error=typeof"
+        export KBUILD_LTO=none
+        export MAKEFLAGS="-j$(nproc)"
 
-       export KBUILD_LTO=none
-       export MAKEFLAGS="-j$(nproc)"
-
-       # 配置
+        # 配置
         make O=out \
          ARCH=arm64 \
          LLVM=1 \
          LLVM_IAS=1 \
          gki_defconfig
 
-       # 删除Polly相关配置
-       sed -i '/CONFIG_POLLY/d' out/.config
-       sed -i '/CONFIG_POLLY_VECTORIZER/d' out/.config
-       sed -i '/CONFIG_POLLY_ISL/d' out/.config
+        # 删除Polly相关配置
+        sed -i '/CONFIG_POLLY/d' out/.config
+        sed -i '/CONFIG_POLLY_VECTORIZER/d' out/.config
+        sed -i '/CONFIG_POLLY_ISL/d' out/.config
 
-       # 编译
-       make -j$(nproc) \
+        # 编译
+        make -j$(nproc) \
          O=out \
          ARCH=arm64 \
          LLVM=1 \
@@ -124,13 +124,13 @@ jobs:
          HOSTCXX=$HOSTCXX \
          Image dtbs > build.log 2>&1 || (cat build.log && exit 1)
 
-       mkdir -p ${{ env.KERNEL_DIR }}/boot
-       cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
+        mkdir -p ${{ env.KERNEL_DIR }}/boot
+        cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
 
-       ls -l ${{ env.KERNEL_DIR }}/boot/
-      - name: 10. 上传编译产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: zako~kernel-gki510-lts-sukisu
-          path: ${{ env.KERNEL_DIR }}/boot/**/*
-          retention-days: 14
+        ls -l ${{ env.KERNEL_DIR }}/boot/
+     - name: 10. 上传编译产物
+       uses: actions/upload-artifact@v4
+      with:
+         name: zako~kernel-gki510-lts-sukisu
+         path: ${{ env.KERNEL_DIR }}/boot/**/*
+         retention-days: 14
