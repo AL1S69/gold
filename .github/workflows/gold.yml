@@ -66,38 +66,49 @@ jobs:
           make O=out ARCH=arm64 defconfig
           # 第二步：按照报错提示，执行oldconfig类命令，生成out目录内的.config文件
           make O=out ARCH=arm64 olddefconfig
-      - name: 9. 全核心编译GKI内核+DTB（添加Clang兼容参数）
+      - name: 9. 全核心编译GKI内核+DTB（纯LLVM编译）
         run: |
           set -xe
           cd ${{ env.KERNEL_DIR }}
           export ARCH=arm64
           export SUBARCH=arm64
+
+          # 目标内核：全套LLVM工具链
           export CC=${{ env.CLANG_DIR }}/bin/clang
+          export CXX=${{ env.CLANG_DIR }}/bin/clang++
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export LD=${{ env.CLANG_DIR }}/bin/ld.lld
           export AR=${{ env.CLANG_DIR }}/bin/llvm-ar
           export NM=${{ env.CLANG_DIR }}/bin/llvm-nm
-          # 修复1：objcopy/objdump 改为llvm原版工具名
           export OBJCOPY=${{ env.CLANG_DIR }}/bin/llvm-objcopy
           export OBJDUMP=${{ env.CLANG_DIR }}/bin/llvm-objdump
-          # 强制主机编译工具使用Clang，彻底禁用系统gcc
+
+          # 重中之重：主机HOST编译也强制LLVM，完全弃用系统gcc/g++
           export HOSTCC=${{ env.CLANG_DIR }}/bin/clang
           export HOSTCXX=${{ env.CLANG_DIR }}/bin/clang++
           export HOSTLD=${{ env.CLANG_DIR }}/bin/ld.lld
           export HOSTAR=${{ env.CLANG_DIR }}/bin/llvm-ar
-          # 修复2：KBUILD_CFLAGS 改为KCFLAGS，防止参数污染HOST gcc，追加gnu99标准
+
+          # 清空全局C/C++标识，防止冗余参数污染HOST编译
+          unset CFLAGS
+          unset CXXFLAGS
+
+          # 内核专属编译参数（仅arm64内核生效，不影响HOST）
           export KCFLAGS="-std=gnu99 -Wno-error=unknown-warning-option -Wno-error=typeof"
           export KBUILD_LTO=none
           export MAKEFLAGS="-j$(nproc)"
-          
-          # 修复3：编译命令兜底指定HOST工具，避免环境变量失效
+
+          # 加载内核配置 + 关闭Polly（Polly易引发LLVM版本适配报错）
           make O=out gki_defconfig
+          sed -i 's/CONFIG_POLLY=y/CONFIG_POLLY=n/' out/.config
+          sed -i 's/CONFIG_POLLY_VECTORIZER=y/CONFIG_POLLY_VECTORIZER=n/' out/.config
+          
+          # 编译Image+DTB，编译阶段再次锁定HOST LLVM
           make -j$(nproc) O=out ARCH=arm64 Image dtbs HOSTCC=$HOSTCC HOSTCXX=$HOSTCXX > build.log 2>&1 || (cat build.log && exit 1)
           
           mkdir -p ${{ env.KERNEL_DIR }}/boot
           cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
           ls -l ${{ env.KERNEL_DIR }}/boot/
-
       - name: 10. 上传编译产物
         uses: actions/upload-artifact@v4
         with:
