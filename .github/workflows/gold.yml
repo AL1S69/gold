@@ -62,12 +62,11 @@ jobs:
           cd ${{ env.KERNEL_DIR }}
           rm -rf out
           mkdir -p out
-          # 第一步：载入gki_defconfig预设配置
-          make O=out ARCH=arm64 defconfig
-          # 第二步：按照报错提示，执行oldconfig类命令，生成out目录内的.config文件
+          # 载入gki_defconfig预设配置
+          make O=out ARCH=arm64 gki_defconfig
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 9. 全核心编译GKI 5.10内核+DTB（LLVM全链路+禁用警告转错误）
+      - name: 9. 全核心编译GKI 5.10内核+DTB（LLVM全链路+全局禁用警告转错误）
         run: |
           set -xe
           cd ${{ env.KERNEL_DIR }}
@@ -79,7 +78,7 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
 
-          # 完整目标架构LLVM工具链，补齐全套llvm工具防止缺失
+          # 完整目标架构LLVM工具链
           export CC=${{ env.CLANG_DIR }}/bin/clang
           export CXX=${{ env.CLANG_DIR }}/bin/clang++
           export LD=${{ env.CLANG_DIR }}/bin/ld.lld
@@ -89,34 +88,35 @@ jobs:
           export OBJDUMP=${{ env.CLANG_DIR }}/bin/llvm-objdump
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # HOST主机全套LLVM，彻底禁用系统gcc
+          # HOST主机全套LLVM，禁用系统gcc
           export HOSTCC=${{ env.CLANG_DIR }}/bin/clang
           export HOSTCXX=${{ env.CLANG_DIR }}/bin/clang++
           export HOSTLD=${{ env.CLANG_DIR }}/bin/ld.lld
           export HOSTAR=${{ env.CLANG_DIR }}/bin/llvm-ar
 
-          # 清空主机编译多余参数，杜绝-mllvm/-polly灌入gcc
+          # 清空主机编译多余参数
           export KBUILD_HOST_CFLAGS=""
           export KBUILD_HOST_CXXFLAGS=""
           export KBUILD_HOST_LDFLAGS=""
           unset CFLAGS CXXFLAGS LDFLAGS
 
-          # 核心配置：全局禁用所有警告转为错误，屏蔽未知警告选项，移除非法typeof参数
-          export KCFLAGS="-std=gnu99 -Wno-error -Wno-error=unknown-warning-option"
+          # 【关键改动】全局内核编译参数，预处理prepare阶段同样生效
+          export KBUILD_CFLAGS="-std=gnu99 -Wno-error -Wno-error=unknown-warning-option"
           export KBUILD_LTO=none
           export MAKEFLAGS="-j$(nproc)"
 
-          # 清理旧构建缓存，避免错误配置残留
+          # 彻底清理旧构建缓存
           make clean
-          rm -rf .tmp_versions modules.order Module.symvers
+          rm -rf .tmp_versions modules.order Module.symvers out
 
-          # 重新生成config并彻底删除Polly相关优化配置
+          # 重新生成config并删除Polly配置
+          mkdir -p out
           make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 gki_defconfig
           sed -i '/CONFIG_POLLY/d' out/.config
           sed -i '/CONFIG_POLLY_VECTORIZER/d' out/.config
           sed -i '/CONFIG_POLLY_ISL/d' out/.config
 
-          # 正式编译Image内核镜像 + DTB设备树
+          # 正式编译内核+设备树
           make -j$(nproc) \
             O=out \
             ARCH=arm64 \
@@ -126,7 +126,7 @@ jobs:
             HOSTCXX=$HOSTCXX \
             Image dtbs > build.log 2>&1 || (cat build.log && exit 1)
 
-          # 导出编译产物至boot目录
+          # 导出产物
           mkdir -p ${{ env.KERNEL_DIR }}/boot
           cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
           ls -l ${{ env.KERNEL_DIR }}/boot/
