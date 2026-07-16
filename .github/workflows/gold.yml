@@ -5,8 +5,8 @@ on:
 
 jobs:
   build_kernel:
-    runs-on: ubuntu-22.04
-    steps:
+   runs-on: ubuntu-22.04
+   steps:
      - name: 1. 安装编译依赖
        run: |
           sudo apt-get update -y && sudo apt-get install -y --no-install-recommends \
