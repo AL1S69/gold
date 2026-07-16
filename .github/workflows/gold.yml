@@ -78,7 +78,11 @@ jobs:
           export NM=${{ env.CLANG_DIR }}/bin/llvm-nm
           export OBJCOPY=${{ env.CLANG_DIR }}/bin/objcopy
           export OBJDUMP=${{ env.CLANG_DIR }}/bin/objdump
-          
+          # 强制主机编译工具使用Clang，彻底禁用系统gcc
+          export HOSTCC=${{ env.CLANG_DIR }}/bin/clang
+          export HOSTCXX=${{ env.CLANG_DIR }}/bin/clang++
+          export HOSTLD=${{ env.CLANG_DIR }}/bin/ld.lld
+          export HOSTAR=${{ env.CLANG_DIR }}/bin/llvm-ar
           # 添加Clang兼容编译参数，解决typeof关键字问题
           export KBUILD_CFLAGS="-Wno-error=unknown-warning-option -Wno-error=typeof"
           export KBUILD_LTO=none
