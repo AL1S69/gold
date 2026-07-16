@@ -66,52 +66,68 @@ jobs:
           make O=out ARCH=arm64 defconfig
           # 第二步：按照报错提示，执行oldconfig类命令，生成out目录内的.config文件
           make O=out ARCH=arm64 olddefconfig
-      - name: 9. 全核心编译GKI内核+DTB（纯LLVM编译）
-        run: |
-          set -xe
-          cd ${{ env.KERNEL_DIR }}
-          export ARCH=arm64
-          export SUBARCH=arm64
+       - name: 9. 全核心编译GKI 5.15内核+DTB（LLVM21）
+         run: |
+        set -xe
+        cd ${{ env.KERNEL_DIR }}
 
-          # 内核目标架构 LLVM 工具链
-          export CC=${{ env.CLANG_DIR }}/bin/clang
-          export CXX=${{ env.CLANG_DIR }}/bin/clang++
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export LD=${{ env.CLANG_DIR }}/bin/ld.lld
-          export AR=${{ env.CLANG_DIR }}/bin/llvm-ar
-          export NM=${{ env.CLANG_DIR }}/bin/llvm-nm
-          export OBJCOPY=${{ env.CLANG_DIR }}/bin/llvm-objcopy
-          export OBJDUMP=${{ env.CLANG_DIR }}/bin/llvm-objdump
+        export ARCH=arm64
+        export SUBARCH=arm64
 
-          # HOST 主机编译统一LLVM，禁用系统gcc
-          export HOSTCC=${{ env.CLANG_DIR }}/bin/clang
-          export HOSTCXX=${{ env.CLANG_DIR }}/bin/clang++
-          export HOSTLD=${{ env.CLANG_DIR }}/bin/ld.lld
-          export HOSTAR=${{ env.CLANG_DIR }}/bin/llvm-ar
+        # LLVM21
+        export LLVM=1
+        export LLVM_IAS=1
 
-          # 核心1：主机编译清空所有额外参数，拒绝内核mllvm/polly参数灌入
-          export KBUILD_HOST_CFLAGS=""
-          export KBUILD_HOST_CXXFLAGS=""
-          export KBUILD_HOST_LDFLAGS=""
-          unset CFLAGS CXXFLAGS LDFLAGS
+       # Clang工具链
+       export CC=${{ env.CLANG_DIR }}/bin/clang
+       export CXX=${{ env.CLANG_DIR }}/bin/clang++
+   
+      # HOST使用LLVM
+       export HOSTCC=${{ env.CLANG_DIR }}/bin/clang
+       export HOSTCXX=${{ env.CLANG_DIR }}/bin/clang++
 
-          # 内核编译专属参数（仅ARM64内核生效，绝不污染HOST）
-          export KCFLAGS="-std=gnu99 -Wno-error=unknown-warning-option -Wno-error=typeof"
-          export KBUILD_LTO=none
-          export MAKEFLAGS="-j$(nproc)"
+       # 保留你的HOST清理
+       export KBUILD_HOST_CFLAGS=""
+       export KBUILD_HOST_CXXFLAGS=""
+       export KBUILD_HOST_LDFLAGS=""
 
-          # 核心2：彻底关闭Polly优化，源头移除所有 -mllvm -polly 参数
-          make O=out gki_defconfig
-          sed -i '/CONFIG_POLLY/d' out/.config
-          sed -i '/CONFIG_POLLY_VECTORIZER/d' out/.config
-          sed -i '/CONFIG_POLLY_ISL/d' out/.config
+       unset CFLAGS
+       unset CXXFLAGS
+       unset LDFLAGS
 
-          # 编译内核+设备树，强制绑定HOST LLVM
-          make -j$(nproc) O=out ARCH=arm64 Image dtbs HOSTCC=$HOSTCC HOSTCXX=$HOSTCXX > build.log 2>&1 || (cat build.log && exit 1)
-          
-          mkdir -p ${{ env.KERNEL_DIR }}/boot
-          cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
-          ls -l ${{ env.KERNEL_DIR }}/boot/
+       # 保留你的KCFLAGS
+       export KCFLAGS="-std=gnu99 -Wno-error=unknown-warning-option -Wno-error=typeof"
+
+       export KBUILD_LTO=none
+       export MAKEFLAGS="-j$(nproc)"
+
+       # 配置
+        make O=out \
+         ARCH=arm64 \
+         LLVM=1 \
+         LLVM_IAS=1 \
+         gki_defconfig
+
+       # 删除Polly相关配置
+       sed -i '/CONFIG_POLLY/d' out/.config
+       sed -i '/CONFIG_POLLY_VECTORIZER/d' out/.config
+       sed -i '/CONFIG_POLLY_ISL/d' out/.config
+
+       # 编译
+       make -j$(nproc) \
+         O=out \
+         ARCH=arm64 \
+         LLVM=1 \
+         LLVM_IAS=1 \
+         CC=$CC \
+         HOSTCC=$HOSTCC \
+         HOSTCXX=$HOSTCXX \
+         Image dtbs > build.log 2>&1 || (cat build.log && exit 1)
+
+       mkdir -p ${{ env.KERNEL_DIR }}/boot
+       cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
+
+       ls -l ${{ env.KERNEL_DIR }}/boot/
       - name: 10. 上传编译产物
         uses: actions/upload-artifact@v4
         with:
