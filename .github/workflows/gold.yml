@@ -71,7 +71,6 @@ jobs:
           cd ${{ env.KERNEL_DIR }}
           export ARCH=arm64
           export SUBARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
           export CC=${{ env.CLANG_DIR }}/bin/clang
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export LD=${{ env.CLANG_DIR }}/bin/ld.lld
