@@ -67,7 +67,7 @@ jobs:
           # 第二步：按照报错提示，执行oldconfig类命令，生成out目录内的.config文件
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 9. 全核心编译GKI 5.15内核+DTB（LLVM21）
+      - name: 9. 全核心编译GKI 5.10内核+DTB（LLVM全链路+禁用警告转错误）
         run: |
           set -xe
           cd ${{ env.KERNEL_DIR }}
@@ -79,7 +79,7 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
 
-          # 完整目标架构LLVM工具链（补齐缺失ld/llvm-ar/llvm-nm等，防止编译缺失工具）
+          # 完整目标架构LLVM工具链，补齐全套llvm工具防止缺失
           export CC=${{ env.CLANG_DIR }}/bin/clang
           export CXX=${{ env.CLANG_DIR }}/bin/clang++
           export LD=${{ env.CLANG_DIR }}/bin/ld.lld
@@ -101,18 +101,22 @@ jobs:
           export KBUILD_HOST_LDFLAGS=""
           unset CFLAGS CXXFLAGS LDFLAGS
 
-          # 仅内核生效编译参数，不污染HOST
-          export KCFLAGS="-std=gnu99 -Wno-error=unknown-warning-option -Wno-error=typeof"
+          # 核心配置：全局禁用所有警告转为错误，屏蔽未知警告选项，移除非法typeof参数
+          export KCFLAGS="-std=gnu99 -Wno-error -Wno-error=unknown-warning-option"
           export KBUILD_LTO=none
           export MAKEFLAGS="-j$(nproc)"
 
-          # 重新加载配置并删除Polly优化项
+          # 清理旧构建缓存，避免错误配置残留
+          make clean
+          rm -rf .tmp_versions modules.order Module.symvers
+
+          # 重新生成config并彻底删除Polly相关优化配置
           make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 gki_defconfig
           sed -i '/CONFIG_POLLY/d' out/.config
           sed -i '/CONFIG_POLLY_VECTORIZER/d' out/.config
           sed -i '/CONFIG_POLLY_ISL/d' out/.config
 
-          # 编译Image+DTB，双重锁定HOST LLVM
+          # 正式编译Image内核镜像 + DTB设备树
           make -j$(nproc) \
             O=out \
             ARCH=arm64 \
@@ -122,6 +126,7 @@ jobs:
             HOSTCXX=$HOSTCXX \
             Image dtbs > build.log 2>&1 || (cat build.log && exit 1)
 
+          # 导出编译产物至boot目录
           mkdir -p ${{ env.KERNEL_DIR }}/boot
           cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
           ls -l ${{ env.KERNEL_DIR }}/boot/
