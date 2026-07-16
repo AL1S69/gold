@@ -66,6 +66,74 @@ jobs:
           make O=out ARCH=arm64 gki_defconfig
           make O=out ARCH=arm64 olddefconfig
 
+     name: Build GKI 5.10 LTS Kernel (zako~kernel+SUKISU)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_kernel:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 1. 安装编译依赖
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y --no-install-recommends \
+            git make bison flex gcc-aarch64-linux-gnu bc libssl-dev libelf-dev \
+            python3 curl liblz4-tool zstd clang lld llvm libncurses5-dev
+          sudo apt-get clean && sudo rm -rf /var/lib/apt/lists/*
+
+      - name: 2. 克隆官方GKI 5.10 LTS源码
+        run: |
+          git clone --depth=1 https://github.com/Winkmoon/android_gki_kernel_5.15_common.git GKI5.10
+          cd GKI5.10
+          git submodule update --init --depth=1
+          echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
+
+      - name: 3. 缓存Clang工具链
+        id: cache-clang
+        uses: actions/cache@v3
+        with:
+          path: ./GKI5.10/clang-r547379
+          key: clang-r547379-gki510-lts
+
+      - name: 4. 下载Clang（缓存未命中）
+        if: steps.cache-clang.outputs.cache-hit != 'true'
+        run: |
+          cd ${{ env.KERNEL_DIR }}
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz -O clang.tar.gz
+          mkdir -p clang-r547379 && tar zxf clang.tar.gz -C clang-r547379 --skip-old-files
+          rm -f clang.tar.gz
+          echo "CLANG_DIR=$(pwd)/clang-r547379" >> $GITHUB_ENV
+
+      - name: 5. 集成SukiSU-Ultra（main分支）
+        run: |
+          cd ${{ env.KERNEL_DIR }}
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+          [ -d "KernelSU" ] && echo "SUKISU集成成功" || exit 1
+
+      - name: 6. 仅为SUKISU模块启用C99（核心修复，不影响内核全局）
+        run: |
+          cd ${{ env.KERNEL_DIR }}
+          # 为KPM模块Makefile添加C99编译标志
+          echo 'EXTRA_CFLAGS += -std=c99 -Wno-gcc-compat -Wno-unused-command-line-argument' >> drivers/kernelsu/kpm/Makefile
+          # 为SUKISU主模块添加兼容标志
+          echo 'EXTRA_CFLAGS += -Wno-type-limits -Wno-pointer-arith' >> drivers/kernelsu/Makefile
+          # 移除全局C99配置（避免内核宏冲突）
+          sed -i '/KBUILD_CFLAGS += -std=gnu99/d' Makefile 2>/dev/null
+
+      - name: 7. 修改内核名（-zako~kernel）
+        run: |
+          sed -i "s/LOCALVERSION=.*/LOCALVERSION=-zako~kernel/" ${{ env.KERNEL_DIR }}/Makefile
+
+      - name: 8. 配置GKI+SUKISU（移除全局C99配置项）
+        run: |
+          cd ${{ env.KERNEL_DIR }}
+          rm -rf out
+          mkdir -p out
+          # 载入gki_defconfig预设配置
+          make O=out ARCH=arm64 gki_defconfig
+          make O=out ARCH=arm64 olddefconfig
+
       - name: 9. 全核心编译GKI 5.10内核+DTB（LLVM全链路+全局禁用警告转错误）
         run: |
           set -xe
@@ -131,6 +199,12 @@ jobs:
           cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
           ls -l ${{ env.KERNEL_DIR }}/boot/
 
+      - name: 10. 上传编译产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: "zako~kernel-gki510-lts-sukisu"
+          path: ${{ env.KERNEL_DIR }}/boot/**/*
+          retention-days: 14
       - name: 10. 上传编译产物
         uses: actions/upload-artifact@v4
         with:
