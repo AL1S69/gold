@@ -46,11 +46,8 @@ jobs:
       - name: 6. 仅为SUKISU模块启用C99（核心修复，不影响内核全局）
         run: |
           cd ${{ env.KERNEL_DIR }}
-          # 为KPM模块Makefile添加C99编译标志
           echo 'EXTRA_CFLAGS += -std=c99 -Wno-gcc-compat -Wno-unused-command-line-argument' >> drivers/kernelsu/kpm/Makefile
-          # 为SUKISU主模块添加兼容标志
           echo 'EXTRA_CFLAGS += -Wno-type-limits -Wno-pointer-arith' >> drivers/kernelsu/Makefile
-          # 移除全局C99配置（避免内核宏冲突）
           sed -i '/KBUILD_CFLAGS += -std=gnu99/d' Makefile 2>/dev/null
 
       - name: 7. 修改内核名（-zako~kernel）
@@ -62,25 +59,22 @@ jobs:
           cd ${{ env.KERNEL_DIR }}
           rm -rf out
           mkdir -p out
-          # 载入gki_defconfig预设配置
           make O=out ARCH=arm64 gki_defconfig
           make O=out ARCH=arm64 olddefconfig
 
-      - name: 9. 全核心编译GKI 5.10内核+DTB（LLVM全链路+修复regalloc报错）
+      - name: 9. 全核心编译GKI 5.10内核+DTB（参数隔离根治HOST GCC报错）
         run: |
           set -xe
           cd ${{ env.KERNEL_DIR }}
 
           export ARCH=arm64
           export SUBARCH=arm64
-
-          # 全局启用LLVM全链路编译
           export LLVM=1
           export LLVM_IAS=1
-          # 关闭LLVM寄存器分配顾问分析，根治 regalloc eviction advisor 报错
+          # 全局关闭寄存器分配顾问
           export LLVM_NO_REGALLOC_ADVISOR=1
 
-          # 完整目标架构LLVM工具链
+          # 交叉编译内核工具链
           export CC=${{ env.CLANG_DIR }}/bin/clang
           export CXX=${{ env.CLANG_DIR }}/bin/clang++
           export LD=${{ env.CLANG_DIR }}/bin/ld.lld
@@ -90,20 +84,24 @@ jobs:
           export OBJDUMP=${{ env.CLANG_DIR }}/bin/llvm-objdump
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # HOST主机全套LLVM，彻底禁用系统gcc
+          # HOST主机全套LLVM，独立环境，隔离所有内核LLVM参数
           export HOSTCC=${{ env.CLANG_DIR }}/bin/clang
           export HOSTCXX=${{ env.CLANG_DIR }}/bin/clang++
           export HOSTLD=${{ env.CLANG_DIR }}/bin/ld.lld
           export HOSTAR=${{ env.CLANG_DIR }}/bin/llvm-ar
 
-          # 清空主机编译多余参数，杜绝llvm参数灌入gcc
+          # -------------------核心隔离改动-------------------
+          # 1. 主机编译完全清空所有全局标记，杜绝-mllvm流入HOST编译
           export KBUILD_HOST_CFLAGS=""
           export KBUILD_HOST_CXXFLAGS=""
           export KBUILD_HOST_LDFLAGS=""
-          unset CFLAGS CXXFLAGS LDFLAGS
+          unset CFLAGS CXXFLAGS LDFLAGS KBUILD_CFLAGS
 
-          # 全局内核编译参数：关闭警告转错误、关闭寄存器分配分析
-          export KBUILD_CFLAGS="-std=gnu99 -Wno-error -Wno-error=unknown-warning-option -mllvm -regalloc-evict-advisor=0"
+          # 2. 不再全局导出KBUILD_CFLAGS，改为仅在make命令行传给内核
+          # 把所有LLVM/警告参数移到编译指令，HOST编译完全不会读取
+          KERNEL_CFLAGS="-std=gnu99 -Wno-error -Wno-error=unknown-warning-option -mllvm -regalloc-evict-advisor=0"
+          # ---------------------------------------------------
+
           export KBUILD_LTO=none
           export MAKEFLAGS="-j$(nproc)"
 
@@ -111,7 +109,7 @@ jobs:
           make clean
           rm -rf .tmp_versions modules.order Module.symvers out
 
-          # 重新生成config，彻底删除Polly与寄存器优化配置
+          # 生成配置，关闭Polly、寄存器优化
           mkdir -p out
           make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 gki_defconfig
           sed -i '/CONFIG_POLLY/d' out/.config
@@ -119,7 +117,7 @@ jobs:
           sed -i '/CONFIG_POLLY_ISL/d' out/.config
           sed -i 's/CONFIG_LLVM_REGALLOC_ADVISOR=y/CONFIG_LLVM_REGALLOC_ADVISOR=n/' out/.config
 
-          # 正式编译内核镜像 + 设备树
+          # 编译时单独传递内核CFLAGS，HOST编译全程无LLVM专属参数
           make -j$(nproc) \
             O=out \
             ARCH=arm64 \
@@ -127,9 +125,10 @@ jobs:
             LLVM_IAS=1 \
             HOSTCC=$HOSTCC \
             HOSTCXX=$HOSTCXX \
+            KBUILD_CFLAGS="$KERNEL_CFLAGS" \
             Image dtbs > build.log 2>&1 || (cat build.log && exit 1)
 
-          # 导出编译产物至boot目录
+          # 导出产物
           mkdir -p ${{ env.KERNEL_DIR }}/boot
           cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
           ls -l ${{ env.KERNEL_DIR }}/boot/
