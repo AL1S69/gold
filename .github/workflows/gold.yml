@@ -5,10 +5,10 @@ on:
 
 jobs:
   build_kernel:
-   runs-on: ubuntu-22.04
-   steps:
-     - name: 1. 安装编译依赖
-       run: |
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 1. 安装编译依赖
+        run: |
           sudo apt-get update -y && sudo apt-get install -y --no-install-recommends \
             git make bison flex gcc-aarch64-linux-gnu bc libssl-dev libelf-dev \
             python3 curl liblz4-tool zstd clang lld llvm libncurses5-dev
@@ -16,7 +16,7 @@ jobs:
 
       - name: 2. 克隆官方GKI 5.10 LTS源码
         run: |
-         git clone --depth=1 https://github.com/Winkmoon/android_gki_kernel_5.15_common.git GKI5.10
+          git clone --depth=1 https://github.com/Winkmoon/android_gki_kernel_5.15_common.git GKI5.10
           cd GKI5.10
           git submodule update --init --depth=1
           echo "KERNEL_DIR=$(pwd)" >> $GITHUB_ENV
@@ -66,71 +66,69 @@ jobs:
           make O=out ARCH=arm64 defconfig
           # 第二步：按照报错提示，执行oldconfig类命令，生成out目录内的.config文件
           make O=out ARCH=arm64 olddefconfig
-     - name: 9. 全核心编译GKI 5.15内核+DTB（LLVM21）
-      run: |
-        set -xe
-        cd ${{ env.KERNEL_DIR }}
 
-        export ARCH=arm64
-        export SUBARCH=arm64
+      - name: 9. 全核心编译GKI 5.15内核+DTB（LLVM21）
+        run: |
+          set -xe
+          cd ${{ env.KERNEL_DIR }}
 
-        # LLVM21
-        export LLVM=1
-        export LLVM_IAS=1
+          export ARCH=arm64
+          export SUBARCH=arm64
 
-        # Clang工具链
-        export CC=${{ env.CLANG_DIR }}/bin/clang
-        export CXX=${{ env.CLANG_DIR }}/bin/clang++
-   
-        # HOST使用LLVM
-        export HOSTCC=${{ env.CLANG_DIR }}/bin/clang
-        export HOSTCXX=${{ env.CLANG_DIR }}/bin/clang++
+          # 全局启用LLVM全链路编译
+          export LLVM=1
+          export LLVM_IAS=1
 
-        # 保留你的HOST清理
-        export KBUILD_HOST_CFLAGS=""
-        export KBUILD_HOST_CXXFLAGS=""
-        export KBUILD_HOST_LDFLAGS=""
- 
-        unset CFLAGS
-        unset CXXFLAGS
-        unset LDFLAGS
+          # 完整目标架构LLVM工具链（补齐缺失ld/llvm-ar/llvm-nm等，防止编译缺失工具）
+          export CC=${{ env.CLANG_DIR }}/bin/clang
+          export CXX=${{ env.CLANG_DIR }}/bin/clang++
+          export LD=${{ env.CLANG_DIR }}/bin/ld.lld
+          export AR=${{ env.CLANG_DIR }}/bin/llvm-ar
+          export NM=${{ env.CLANG_DIR }}/bin/llvm-nm
+          export OBJCOPY=${{ env.CLANG_DIR }}/bin/llvm-objcopy
+          export OBJDUMP=${{ env.CLANG_DIR }}/bin/llvm-objdump
+          export CLANG_TRIPLE=aarch64-linux-gnu-
 
-        # 保留你的KCFLAGS
-        export KCFLAGS="-std=gnu99 -Wno-error=unknown-warning-option -Wno-error=typeof"
+          # HOST主机全套LLVM，彻底禁用系统gcc
+          export HOSTCC=${{ env.CLANG_DIR }}/bin/clang
+          export HOSTCXX=${{ env.CLANG_DIR }}/bin/clang++
+          export HOSTLD=${{ env.CLANG_DIR }}/bin/ld.lld
+          export HOSTAR=${{ env.CLANG_DIR }}/bin/llvm-ar
 
-        export KBUILD_LTO=none
-        export MAKEFLAGS="-j$(nproc)"
+          # 清空主机编译多余参数，杜绝-mllvm/-polly灌入gcc
+          export KBUILD_HOST_CFLAGS=""
+          export KBUILD_HOST_CXXFLAGS=""
+          export KBUILD_HOST_LDFLAGS=""
+          unset CFLAGS CXXFLAGS LDFLAGS
 
-        # 配置
-        make O=out \
-         ARCH=arm64 \
-         LLVM=1 \
-         LLVM_IAS=1 \
-         gki_defconfig
+          # 仅内核生效编译参数，不污染HOST
+          export KCFLAGS="-std=gnu99 -Wno-error=unknown-warning-option -Wno-error=typeof"
+          export KBUILD_LTO=none
+          export MAKEFLAGS="-j$(nproc)"
 
-        # 删除Polly相关配置
-        sed -i '/CONFIG_POLLY/d' out/.config
-        sed -i '/CONFIG_POLLY_VECTORIZER/d' out/.config
-        sed -i '/CONFIG_POLLY_ISL/d' out/.config
+          # 重新加载配置并删除Polly优化项
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 gki_defconfig
+          sed -i '/CONFIG_POLLY/d' out/.config
+          sed -i '/CONFIG_POLLY_VECTORIZER/d' out/.config
+          sed -i '/CONFIG_POLLY_ISL/d' out/.config
 
-        # 编译
-        make -j$(nproc) \
-         O=out \
-         ARCH=arm64 \
-         LLVM=1 \
-         LLVM_IAS=1 \
-         CC=$CC \
-         HOSTCC=$HOSTCC \
-         HOSTCXX=$HOSTCXX \
-         Image dtbs > build.log 2>&1 || (cat build.log && exit 1)
+          # 编译Image+DTB，双重锁定HOST LLVM
+          make -j$(nproc) \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            HOSTCC=$HOSTCC \
+            HOSTCXX=$HOSTCXX \
+            Image dtbs > build.log 2>&1 || (cat build.log && exit 1)
 
-        mkdir -p ${{ env.KERNEL_DIR }}/boot
-        cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
+          mkdir -p ${{ env.KERNEL_DIR }}/boot
+          cp -r out/arch/arm64/boot/* ${{ env.KERNEL_DIR }}/boot/
+          ls -l ${{ env.KERNEL_DIR }}/boot/
 
-        ls -l ${{ env.KERNEL_DIR }}/boot/
-     - name: 10. 上传编译产物
-       uses: actions/upload-artifact@v4
-      with:
-         name: zako~kernel-gki510-lts-sukisu
-         path: ${{ env.KERNEL_DIR }}/boot/**/*
-         retention-days: 14
+      - name: 10. 上传编译产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: "zako~kernel-gki510-lts-sukisu"
+          path: ${{ env.KERNEL_DIR }}/boot/**/*
+          retention-days: 14
